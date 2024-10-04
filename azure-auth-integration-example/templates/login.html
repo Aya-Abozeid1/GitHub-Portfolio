@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Aspire URL Shortener</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://www.w3schools.com/w3css/4/w3.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Raleway">
+<style>
+body,h1 {font-family: "Raleway", sans-serif}
+body, html {height: 100%}
+.bgimg {
+  /* background-color: #1A2C3F; */
+  background: url(../static/w12.jpg) no-repeat center fixed;
+  min-height: 100%;
+  background-position: center;
+  background-size: cover;
+}
+
+.signin-button {
+  float: right;
+  margin-top: 10px;
+  margin-right: 70px;
+  background-color: #007bff;
+  color: white;
+  padding: 10px 20px;
+  /* border-radius: 5px; */
+  cursor: pointer;
+}
+
+</style>
+</head>
+<body>
+<div class="bgimg w3-display-container w3-animate-opacity w3-text-white">
+  <div class="signin-button">
+    <a href="{{ auth_url }}">Sign In</a>
+  </div>
+  <div class="w3-display-topleft w3-padding-large w3-xlarge">
+    <img src="../static/aspire.jpg" alt="Aspire Logo">
+  </div>
+  <div class="w3-display-middle">
+    <h1 class="w3-jumbo w3-animate-top">Aspire URL Shortener</h1>
+    <hr class="w3-border-grey" style="margin:auto;width:40%">
+    <p style="margin-left: 70px;">Shorten your URLs and make them easier to remember and share.</p>
+    <p style="position: -ms-page;">Just enter the long URL you want to shorten and we will create a short, memorable URL for you.</p>
+  </div>
+</div>
+
+</body>
+</html>
+  
+  
+  
+  <!--<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+</head>
+
+<body>
+ {% with messages = get_flashed_messages() %}
+  {% if messages %}
+  <ul class="messages">
+    {% for message in messages %}
+    <li>{{ message }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% endwith %} 
+  <h1>Microsoft Identity Python Web App</h1>
+
+  <li><a href='{{ auth_url }}'>Sign In</a></li>
+
+  {% if config.get("B2C_RESET_PASSWORD_AUTHORITY") %}
+  <li><a href='{{_build_auth_code_flow(authority=config["B2C_RESET_PASSWORD_AUTHORITY"])["auth_uri"]}}'>Reset
+      Password</a></li>
+  {% endif %}
+
+  <hr>
+  <footer style="text-align: right">Powered by MSAL Python {{ version }}</footer>
+</body>
+
+</html>-->

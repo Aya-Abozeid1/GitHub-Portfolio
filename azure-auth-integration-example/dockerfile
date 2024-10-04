@@ -1,0 +1,30 @@
+FROM python:latest
+
+RUN pip install --upgrade pip
+RUN pip install mysql-connector-python
+RUN pip install flask
+
+COPY ./static ./static
+COPY ./templates ./templates
+
+COPY ./app_config.py ./
+COPY ./sql_table.py ./
+
+COPY ./check_encode.py ./
+COPY ./display_list.py ./
+COPY ./shorty_api.py ./
+
+COPY ./app.py ./
+
+COPY ./requirements.txt ./
+RUN pip install -r requirements.txt
+
+CMD [ "python" , "./app.py" ]
+
+EXPOSE 5000
+
+
+
+
+
+
