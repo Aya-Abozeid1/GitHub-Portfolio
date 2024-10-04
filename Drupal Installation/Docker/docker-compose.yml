@@ -1,0 +1,15 @@
+version: "3.7"
+services:
+        preprod:
+          container_name: portal
+          image: image_name:latest
+          ports:
+            - 8080:80
+          volumes:
+            - ./web/sites/default/files:/var/www/portal/web/sites/default/files:rw
+          environment:
+            - db=??
+            - user=??
+            - pass=??
+            - host=?? 
+ 

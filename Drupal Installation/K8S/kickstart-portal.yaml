@@ -1,0 +1,60 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kickstart-portal
+  namespace: kickstart-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: drupal2
+      resource: statefulset
+  serviceName: mydrupal
+  template:
+    metadata:
+      labels:
+        app: drupal2
+        resource: statefulset
+    spec:
+      containers:
+      - env:
+        - name: DRUPAL_DB_DRIVER
+          value: mysql
+        - name: DRUPAL_DB_NAME
+          value: ??
+        - name: DRUPAL_DB_HOST
+          value: ??
+        - name: DRUPAL_DB_PORT
+          value: "3306"
+        - name: DRUPAL_DB_USERNAME
+          value: "??"
+        - name: DRUPAL_DB_PASSWORD
+          value: "??"
+        image: image_name:latest
+        imagePullPolicy: Always
+        lifecycle:
+          postStart:
+            exec:
+              command:
+              - /bin/bash
+              - -c
+              - rm composer.lock; composer up; cd /var/www/portal/web; /var/www/portal/vendor/bin/drush -y cim; 
+                /var/www/portal/vendor/bin/drush cr
+        name: drupal-portal
+        ports:
+        - containerPort: 80
+          name: portal
+          protocol: TCP
+      initContainers:
+      - args:
+        - cp -r /var/www/portal/web/sites/ /data/; chown www-data:www-data /data/
+          -R
+        command:
+        - /bin/bash
+        - -c
+        image: image_name:latest
+        imagePullPolicy: Always
+        name: init-sites-volume
+      restartPolicy: Always
+      schedulerName: default-scheduler

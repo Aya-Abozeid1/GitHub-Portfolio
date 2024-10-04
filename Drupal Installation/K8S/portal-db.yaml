@@ -1,0 +1,64 @@
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kickstart-mariadb
+  namespace: kickstart-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db
+  serviceName: db
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      containers:
+      - env:
+        - name: DRUPAL_DB_HOST
+          value: kickstartdatabase-svc
+        - name: MARIADB_ROOT_PASSWORD
+          value: ??
+        - name: MARIADB_DATABASE
+          value: ??
+        - name: MARIADB_USER
+          value: ??
+        - name: MARIADB_PASSWORD
+          value: ??
+        image: image_name:latest
+        imagePullPolicy: Always
+        name: kickstart-mariadb
+        ports:
+        - containerPort: 3306
+          name: db
+          protocol: TCP
+        volumeMounts:
+        - mountPath: /var/lib/mysql
+          name: vol-db
+          subPath: dbdata
+        - mountPath: /docker-entrypoint-initdb.d/
+          name: mariadb-sql-schema
+      dnsPolicy: ClusterFirst
+      initContainers:
+      - command:
+        - wget
+        - -O
+        - /docker-entrypoint-initdb.d/apigee.sql
+        - https://storage.googleapis.com/kickstart-db/apigee.sql
+        image: busybox
+        imagePullPolicy: Always
+        name: init-db
+        volumeMounts:
+        - mountPath: /docker-entrypoint-initdb.d/
+          name: mariadb-sql-schema
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      volumes:
+      - name: vol-db
+        persistentVolumeClaim:
+          claimName: kickstartdatabase-pvc
+      - name: mariadb-sql-schema
+        persistentVolumeClaim:
+          claimName: init-script

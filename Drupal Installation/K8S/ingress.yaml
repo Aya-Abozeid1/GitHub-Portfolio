@@ -1,0 +1,12 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  namespace: kickstart-dev
+  name: kickstartportal-service-ingress
+spec:
+  defaultBackend:
+    service:
+      name: kickstartportal-svc
+      port:
+        number: 80

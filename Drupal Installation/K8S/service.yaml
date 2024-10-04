@@ -1,0 +1,45 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    cloud.google.com/neg: '{"ingress":true}'
+  labels:
+    app: drupal2
+  name: kickstartportal-svc
+  namespace: kickstart-dev
+spec:
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: web
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  - name: db
+    port: 3306
+    protocol: TCP
+    targetPort: 3306
+  selector:
+    app: drupal2
+  type: LoadBalancer
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kickstartdatabase-svc
+  namespace: kickstart-dev
+spec:
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: db
+    port: 3306
+    protocol: TCP
+    targetPort: 3306
+  selector:
+    app: db
+  sessionAffinity: None
+  type: LoadBalancer

@@ -1,0 +1,68 @@
+#Drupal Image
+FROM drupal:8-apache
+
+# install dependencies
+RUN apt-get update
+RUN apt-get install -y wget git
+RUN apt-get update && apt-get install -y curl \
+  git ranger unzip vim nano sqlite3 libmagick++-dev \
+  libmagickwand-dev libpq-dev libfreetype6-dev \
+  libjpeg62-turbo-dev libpng-dev libwebp-dev libxpm-dev
+
+RUN docker-php-ext-configure gd --with-jpeg=/usr/include/ \
+  --with-freetype=/usr/include/
+
+RUN docker-php-ext-install gd bcmath
+
+# install and setup drupal tools
+RUN echo "memory_limit = -1;" > /usr/local/etc/php/php.ini
+WORKDIR /var/www/portal
+RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
+RUN php composer-setup.php
+RUN rm composer-setup.php
+RUN mv composer.phar /usr/bin/composer
+RUN composer self-update --2
+
+# install dependencies
+WORKDIR /var/www/portal
+RUN mkdir private
+RUN chown root:www-data private/
+RUN chmod -R 777 private/
+
+COPY ./web/libraries/ /var/www/portal/web/libraries/
+COPY ./web/modules/ /var/www/portal/web/modules/
+COPY ./web/sites/ /var/www/portal/web/sites/
+COPY ./web/themes/ /var/www/portal/web/themes/
+RUN true
+COPY ./web/sites/default/sync/ /var/www/portal/web/sites/default/sync/
+COPY ./web/content/sync/ /var/www/portal/web/content/sync/
+
+RUN echo "test"
+
+# configure apache
+RUN sed -i 's/DocumentRoot .*/DocumentRoot \/var\/www\/portal\/web/' /etc/apache2/sites-available/000-default.conf
+RUN mkdir -p /var/www/portal/web/sites/default/files
+
+
+WORKDIR /var/www/portal
+# RUN yes | rm ./composer.lock
+COPY ./composer.json ./
+COPY ./patches /var/www/portal/patches
+RUN composer install
+
+# RUN yes | ./vendor/drush/drush/drush init
+
+RUN composer clear-cache
+RUN rm composer.lock
+RUN composer up
+
+# set permissions
+WORKDIR /var/www/portal
+ADD ./set-permissions.sh ./set-permissions.sh
+RUN chmod +x ./set-permissions.sh && ./set-permissions.sh --drupal_path=$(pwd)/web --drupal_user=root --httpd_group=www-data
+
+RUN chmod -R 775 web/sites/default
+RUN chmod a+w web/sites/default/files
+
+# Expose Dev Portal Http Port
+EXPOSE 80

@@ -33,10 +33,4 @@ Before running any of the scripts, ensure that the following prerequisites are m
 2. Configure **firewalls** to allow traffic between the Apigee components.
 3. Set up **hostname resolution** for each component (e.g., via `/etc/hosts` or DNS).
 4. Install **Java** and set the `JAVA_HOME` environment variable.
-   
-## Installation Instructions
 
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/your-username/apigee-onprem-install-scripts.git
-   cd apigee-onprem-install-scripts
