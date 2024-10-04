@@ -28,3 +28,5 @@ This repository contains instructions and configuration files for installing and
 4. [Fleet](#4-install-fleet)
 5. [Filebeat](#5-install-filebeat)
 
+
+![alt text](elastic.png)
