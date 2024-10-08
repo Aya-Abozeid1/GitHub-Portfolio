@@ -1,0 +1,21 @@
+  {{- if .Values.createIngress }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+   name: {{ include "performance-app.fullname" . }}
+   # annotations:
+   #   kubernetes.io/ingress.class: nginx
+spec:
+   rules:
+   - host: {{ .Values.ingress.hostname }}
+     http:
+       paths:
+       - path: /
+         pathType: Prefix
+         backend:
+           service:
+             name: {{ .Values.ingress.servicename }}
+             port:
+               number: {{ .Values.service.port }}
+   ingressClassName: nginx
+{{- end }}

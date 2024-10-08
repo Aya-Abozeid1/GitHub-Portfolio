@@ -1,0 +1,18 @@
+{{- if .Values.createSVC }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "performance-app.fullname" . }}
+  labels:
+    {{- include "performance-app.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP
+      name: {{ .Values.service.name }}
+  selector:
+    {{- include "performance-app.selectorLabels" . | nindent 4 }}
+  
+{{- end }}

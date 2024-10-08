@@ -1,0 +1,17 @@
+  {{- if .Values.createSVC }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "performance-app.fullname" . }}-test-connection"
+  labels:
+    {{- include "performance-app.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+spec:
+  containers:
+    - name: wget
+      image: busybox
+      command: ['wget']
+      args: ['{{ include "performance-app.fullname" . }}:{{ .Values.service.port }}']
+  restartPolicy: Never
+{{- end }}

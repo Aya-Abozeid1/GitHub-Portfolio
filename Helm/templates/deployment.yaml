@@ -1,0 +1,121 @@
+{{- if .Values.deployApp }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "performance-app.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "performance-app.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "performance-app.labels" . | nindent 8 }}
+	{{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "performance-app.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.createPV }}
+          volumeMounts:
+            - name: vol-data
+              mountPath: {{ .Values.pv.hostPath }}
+          {{- end }}
+          env:
+            - name: BACKEND_API
+              valueFrom:
+                secretKeyRef:
+                  name: performance-app-secret 
+                  key: BACKEND_API
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+#          livenessProbe:
+#            httpGet:
+#              path: /
+#              port: {{ .Values.livenessProbe.port }}
+#          readinessProbe:
+#            httpGet:
+#              path: /
+#              port: {{ .Values.readinessProbe.port }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.createPV }}
+          volumeMounts:
+            - name: vol-data
+              mountPath: {{ .Values.pv.hostPath }}
+          {{- end }}
+    {{- if .Values.createPV }}
+      volumes:
+        - name: vol-data
+          persistentVolumeClaim:
+            claimName: {{ include "performance-app.fullname" . }}-pvc
+      {{- end }}
+      nodeSelector:
+        {{- toYaml .Values.nodeSelector | nindent 8 }}
+    {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+    {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
+
+
+########################################
+#####           Cron Job           #####
+########################################
+---
+{{- if .Values.createCronJob }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Values.namespace }}
+spec:
+  schedule: "0 7 * * *"  # Cron expression everyday at 7 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: {{ .Chart.Name }}
+            image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"  # Replace with your Docker image
+            command: ["node", "cron.js"]
+            env:
+                - name: UPLOAD_PATH
+                  valueFrom:
+                    secretKeyRef:
+                      name: performance-app-secret
+                      key: UPLOAD_PATH
+          restartPolicy: OnFailure
+{{- end }}
