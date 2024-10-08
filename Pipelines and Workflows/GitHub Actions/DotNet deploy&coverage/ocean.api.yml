@@ -1,0 +1,162 @@
+name: project_name
+on:
+  pull_request:
+    branches:
+      - master
+  push:
+    tags:
+      - "*"
+    branches:
+      - $branch_name
+env:
+  buildConfiguration: Release
+  disable_coverage_autogenerate: 'true'
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      SQLServer_Server: $hostname
+    timeout-minutes: 20
+    steps:
+    - name: checkout
+      uses: actions/checkout@v4.1.0
+
+    - name: Dotnet restore
+      env:
+        PAT: ${{ secrets.PAT  }}
+        USER: ${{ vars.USER }}
+      run: |
+        dotnet nuget add source -n "github" -u $env:USER -p $env:PAT  --store-password-in-clear-text https://nuget.pkg.github.com/package_name/index.json
+        dotnet restore --force-evaluate
+
+    - name: Use .NET 5.0
+      uses: actions/setup-dotnet@v4.0.0
+      with:
+        dotnet-version: 5.x
+
+    - name: Use .NET 6.0
+      uses: actions/setup-dotnet@v4.0.0
+      with:
+        dotnet-version: 6.x    
+
+    - run: dotnet --list-sdks
+    - name: Install ReportGenerator tool
+      shell: pwsh
+      run: |
+        dotnet tool install --global dotnet-reportgenerator-globaltool
+        
+    - name: Dotnet build
+      run: dotnet build --configuration ${{ env.buildConfiguration }}
+
+    - name: Run tests and generate coverage reports
+      shell: pwsh
+      run: |
+        $summaryContent = ""
+        foreach ($folder in Get-ChildItem -Path ./ -Recurse -Directory -Filter '*.Tests') {
+          $folder_name = $folder.Name
+          $test_folder = "$($folder.FullName)"
+
+          & dotnet test "$test_folder" --logger trx --settings "./test.runsettings" --configuration $env:buildConfiguration /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura
+          $coveragefile = Get-ChildItem -Path "$test_folder" -Filter '*.cobertura.xml' -File -ErrorAction SilentlyContinue
+          if ($coveragefile) {
+          reportgenerator -reports:$coveragefile.FullName -targetdir:$env:GITHUB_WORKSPACE\report\$folder_name -reporttypes:MarkdownSummaryGithub -filefilters:-*.g.cs -verbosity:Warning
+          Copy-Item "$env:GITHUB_WORKSPACE\report\$folder_name\SummaryGithub.md" -Destination ".\report\$folder_name.md"
+          }
+        }
+
+    - name: Upload coverage reports
+      uses: actions/upload-artifact@v2
+      with:
+        name: coverage-reports
+        path: ./report/
+
+
+  coverage-reports:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+    - name: Download coverage reports
+      uses: actions/download-artifact@v2
+      with:
+        name: coverage-reports
+        path: coverage-reports
+
+    - name: Print coverage reports to workflow summary
+      run: |
+        ls -R ./coverage-reports
+        for report in coverage-reports/*.md; do
+          echo "report var: $report"
+          echo "value: $(basename $report)"
+          sed -i 's/# Summary/## 📝 '"$(basename $report)"' Code Coverage/g' $report
+          sed -i 's/## Coverage/### '"$(basename $report)"' Code Coverage details/g' $report
+          cat $report >> $GITHUB_STEP_SUMMARY
+        done 
+  
+  publish:
+    needs: coverage-reports
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' && github.event_name != 'workflow_dispatch'
+    timeout-minutes: 20
+    steps:
+    - name: checkout
+      uses: actions/checkout@v4.1.0
+    
+    - name: Dotnet restore
+      env:
+        PAT: ${{ secrets.PAT  }}
+        USER: ${{ vars.USER }}
+      run: |
+        dotnet nuget add source -n "github" -u $USER -p $PAT  --store-password-in-clear-text https://nuget.pkg.github.com/package_name/index.json
+        dotnet restore --force-evaluate     
+      
+    - name: Use .NET 5.0
+      uses: actions/setup-dotnet@v4.0.0
+      with:
+        dotnet-version: 5.0.x
+
+    - name: Use .NET 6.0
+      uses: actions/setup-dotnet@v4.0.0
+      with:
+        dotnet-version: 6.0.x
+
+     #  remove newer versions to use only 5&6
+    - run: |
+        dotnet --list-sdks 
+        sudo rm -rf /usr/share/dotnet/sdk/8.*
+        sudo rm -rf /usr/share/dotnet/sdk/7.*
+        dotnet --list-runtimes
+        dotnet --list-sdks
+    - name: Dotnet build
+      run: dotnet build --configuration ${{ env.buildConfiguration }}
+    
+    - name: Dotnet publish
+      run: dotnet publish **/filename.csproj -c ${{ env.buildConfiguration }} -o ${{ github.workspace }}/publish /p:DebugType=None /p:DebugSymbols=false
+    
+    - name: Generate OpenApi
+      run: |
+        dotnet new tool-manifest
+        dotnet tool install --version 6.5.0 Swashbuckle.AspNetCore.Cli
+        #dotnet add package Swashbuckle.AspNetCore --version 6.5.0
+        dotnet swagger tofile --output openapi.json ${{ github.workspace }}/publish/filename.dll v1
+
+    - name: 'Api: Build and push an image to container registry'
+      uses: docker/login-action@v3.0.0
+      with:
+        registry: "${{ vars.DOCKER_REGISTRY }}"
+        username: "${{ secrets.DOCKER_USERNAME }}"
+        password: "${{ secrets.DOCKER_PASSWORD }}"
+
+    - name: 'Api: Build and push an image to container registry'
+      run: |
+        docker build --file "Dockerfile" -t ${{ vars.DOCKER_REGISTRY }}/api:${{ github.ref }}
+        docker push ${{ vars.DOCKER_REGISTRY }}/api:${{ github.ref }}
+
+    - name: 'Api: List Dotnet publish folder content'
+      run: ls -R
+    
+    - name: 'OpenApi : Build and push an image to container registry'
+      run: |
+        docker build --file "OpenApiDockerfile" -t ${{ vars.DOCKER_REGISTRY }}/openapi:${{ github.ref }}
+        docker push ${{ vars.DOCKER_REGISTRY }}/openapi:${{ github.ref }}
+
