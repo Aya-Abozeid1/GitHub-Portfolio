@@ -1,0 +1,120 @@
+name: Frontend Build, Test Workflow
+on:
+  push:
+    branches:
+      - main
+      - code-build-ci
+    paths:
+      - "front/src/**"
+      - ".github/workflows/frontend-ci.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "front/src/**"
+
+# permissions:
+#   contents: "read"
+#   actions: "write"
+defaults:
+  run:
+    working-directory: front/src
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cache dependencies
+        uses: actions/cache@v2
+        with:
+          path: ~/.npm
+          key: npm-${{ hashFiles('src/package-lock.json') }}
+          restore-keys: npm-
+
+      - name: Restore cached npm dependencies
+        id: cache-dependencies-restore
+        uses: actions/cache/restore@v3
+        with:
+          path: |
+            node_modules
+            ~/.cache/Cypress # needed for the Cypress binary
+          key: npm-dependencies-${{ hashFiles('src/package-lock.json') }}
+
+      - name: Install Depedencies
+        working-directory: ./front/src
+        run: npm ci
+
+      - name: Cache npm dependencies
+        id: cache-dependencies-save
+        uses: actions/cache/save@v3
+        with:
+          path: |
+            node_modules
+            ~/.cache/Cypress # needed for the Cypress binary
+          key: ${{ steps.cache-dependencies-restore.outputs.cache-primary-key }}
+
+      - name: Nx set SHAs
+        uses: nrwl/nx-set-shas@v4.0.4
+      # This line is needed for nx affected to work when CI is running on a PR
+      - name: track main branch
+        if: github.event_name == 'pull_request'
+        working-directory: ./front/src
+        run: git branch --track main origin/main
+
+      - name: Lint, build and execute tests
+        working-directory: ./front/src
+        run: npx nx run-many --all -t lint,test,build --parallel=3 --configuration=ci
+        continue-on-error: true
+
+      - name: Execute end2end tests
+        #if: failure()
+        working-directory: ./front/src
+        run: npx nx run-many --all -t e2e --parallel=1
+        continue-on-error: true
+
+      - name: Generate Coverage Reports
+        #if: failure()
+        working-directory: ./front/src
+        run: npx nx report --all --type=lcovonly
+
+      - name: Upload Coverage Report
+        #if: failure()
+        uses: actions/upload-artifact@v2
+        with:
+          name: coverage
+          path: ./front/src/coverage
+
+      - name: Find each app report file
+        id: edit_index
+        run: |
+          edited_lines=""
+          for file in $(find ./coverage/apps -maxdepth 2 -type f -name "index.html"); do
+            relative_path=$(echo "$file" | sed 's|^./coverage/||')
+            sed -i "s|href=.*|href=\"https://bookish-dollop-9366zr6.pages.github.io/&\$relative_path\"|g" "$file"
+            edited_line="Check This: https://bookish-dollop-9366zr6.pages.github.io/$relative_path"
+            echo "$edited_line"
+            edited_lines="$edited_lines\n$edited_line"
+          done
+          echo -e "$edited_lines" > edited_urls.txt
+          echo "::set-output name=edited_urls::$(cat edited_urls.txt)"
+          cat edited_urls.txt >> $GITHUB_STEP_SUMMARY
+
+      - name: Download Coverage Report Artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/download-artifact@v2
+        with:
+          name: coverage
+
+      - name: Deploy to GitHub Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: .
+          publish_branch: gh-pages
+          force_orphan: true
+

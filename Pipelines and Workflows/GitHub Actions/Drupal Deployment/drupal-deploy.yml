@@ -1,0 +1,53 @@
+name: Deployment
+on:
+  release:
+    types: [published]
+
+env:
+  PROJECT_ID: ??
+  GKE_CLUSTER: ??   # Add your cluster name here.
+  GKE_ZONE: europe-west1-b	  # Add your cluster zone here.
+  DEPLOYMENT_NAME: ?? # Add your deployment name here.
+  Conatiner_Name: drupal-portal
+  IMAGE: image_name
+
+#define jobs
+jobs:  
+  Dev-Deploy:
+    runs-on: ubuntu-latest #run this workflow on ubuntu instance
+    permissions: #make sure we add permission to read and write package
+      contents: read
+      packages: write
+    steps:
+
+      - name: Login to GCR
+        uses: google-github-actions/setup-gcloud@v0.3.0 #checkouts GCR repo, so this workflow can access it
+        with:
+          service_account_key: ${{ secrets.SERVICE_ACCOUNT_KEY }} #parse the value of repository secret called SERVICE_ACCOUNT_KEY that we have created earlier
+          project_id: ${{ env.PROJECT_ID }} #parse the value of env called PROJECT_ID
+          export_default_credentials: true
+      - name: Get Tag Name
+        uses: olegtarasov/get-tag@v2.1.2
+        id: tagName
+        with:
+          tagname: ${{ steps.tagName.outputs.tag }}
+      - name: Add the Release Tag to latest Image
+        run: |-
+          gcloud container images add-tag "${{env.IMAGE}}:latest" "${{env.IMAGE}}:$GIT_TAG_NAME"      
+      
+      - name: Connect to GKE
+        uses: google-github-actions/get-gke-credentials@fb08709ba27618c31c09e014e1d8364b02e5042e
+        with:
+          cluster_name: ${{ env.GKE_CLUSTER }}
+          location: ${{ env.GKE_ZONE }}
+          credentials: ${{ secrets.SERVICE_ACCOUNT_KEY }}
+
+      - name: Deploy
+        run: |-
+          kubectl set image statefulset/${{env.DEPLOYMENT_NAME}} ${{env.Conatiner_Name}}="${{env.IMAGE}}:latest" -n ??
+          kubectl rollout restart statefulset/${{env.DEPLOYMENT_NAME}} -n ??  
+          sleep 20s
+          while [[ $(kubectl get pods -l resource=statefulset -n ?? -o 'jsonpath={..status.conditions[?(@.type=="Ready")].status}') != "True" ]]; do echo "waiting for pod" && sleep 1; done  
+          kubectl -n ?? exec -i statefulset/${{env.DEPLOYMENT_NAME}} -- /bin/bash -c "cd /var/www/portal/web; /var/www/portal/vendor/bin/drush cr; /var/www/portal/vendor/bin/drush updb -y; /var/www/portal/vendor/bin/drush cr;"
+
+

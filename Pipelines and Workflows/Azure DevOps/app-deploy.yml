@@ -1,0 +1,112 @@
+name: hriProjectPipeline-$(SourceBranchName)-$(Date:yyyMMdd)$(Rev:.r)
+
+trigger: none
+
+resources:
+  pipelines:
+  - pipeline: project_nameProjectPipeline # Name of the pipeline resource.
+    source: project_name Project CI # The name of the pipeline referenced by this pipeline resource.
+    trigger: true # Run project_nameProjectPipeline pipeline when any run of security-lib-ci completes
+
+pool:
+  vmImage: 'windows-latest'
+
+stages:
+- stage: build_release
+  displayName: 'Build (Release)'
+  jobs:
+  - job: build_hri_release
+    displayName: 'Build project_name.HRI (Release)'
+    steps:
+      - task: DownloadPipelineArtifact@2
+        displayName: 'Download project_name Project CI Packages'
+        inputs:
+          buildType: 'specific'
+          project: '737c870d-a7e5-45db-b8f8-80a861514ed3'
+          definition: '7'
+          specificBuildWithTriggering: true
+          buildVersionToDownload: 'latest'
+          artifactName: 'project_name_SLN'
+          targetPath: '$(Pipeline.Workspace)'
+
+      - task: ExtractFiles@1
+        displayName: 'Extract project_name Project CI packages'
+        inputs:
+          archiveFilePatterns: '$(Pipeline.Workspace)\**\project_name_SLN.zip'
+          destinationFolder: '$(Build.SourcesDirectory)\packages\'
+          cleanDestinationFolder: false
+          overwriteExistingFiles: true
+
+      - task: NuGetToolInstaller@1
+        displayName: 'Install NuGet 6.3'
+        inputs:
+          versionSpec: '6.3'
+
+      - task: UseDotNet@2
+        displayName: 'Set .net to version 6.0'
+        inputs:
+          packageType: 'sdk'
+          version: '6.x'
+
+      - task: NuGetCommand@2
+        displayName: 'HRInterface Restore'
+        inputs:
+          command: 'restore'
+          restoreSolution: '$(Build.SourcesDirectory)\HRInterfaceNetCore\HRInterface.sln'
+          feedsToUse: 'select'
+          vstsFeed: '737c870d-a7e5-45db-b8f8-80a861514ed3/4aa65ae0-cee7-421c-80cd-120b1658020d'
+          restoreDirectory: '$(Build.SourcesDirectory)\packages\'
+
+      - task: MSBuild@1
+        displayName: 'MSBuild HRInterface (Release)'
+        inputs:
+          solution: '$(Build.SourcesDirectory)\HRInterfaceNetCore\HRInterface.sln'
+          msbuildVersion: '17.0'
+          msbuildArchitecture: 'x64'
+          msbuildArguments: '/t:Build /p:Configuration=Release /p:Platform="Any CPU" /p:SkipInvalidConfigurations=true -m /p:OutputPath=$(Build.SourcesDirectory)\HRInterfaceNetCore\artifacts\HRInterface-publish\'
+
+      - task: CopyFiles@2
+        displayName: 'Copy HRInterfaceNetCore to artifact directory'
+        inputs:
+          SourceFolder: '$(Build.SourcesDirectory)\HRInterfaceNetCore\artifacts\HRInterface-publish\'
+          Contents: '**'
+          TargetFolder: '$(Build.ArtifactStagingDirectory)\HRInterface-publish\'
+
+      - task: CopyFiles@2
+        displayName: 'Copy HRInterfaceTests & SharedTests to temp'
+        inputs:
+          SourceFolder: '$(Build.SourcesDirectory)\HRInterfaceNetCore\artifacts\HRInterface-publish\'
+          Contents: '**'
+          TargetFolder: '$(Agent.TempDirectory)\Tests\'
+
+
+      - task: VisualStudioTestPlatformInstaller@1
+        inputs:
+          packageFeedSelector: 'nugetOrg'
+          versionSelector: 'specificVersion'
+          testPlatformVersion: '16.11.0'
+
+      - task: VSTest@2
+        displayName: 'Run HRInterfaceTests'
+        inputs:
+          testSelector: 'testAssemblies'
+          testAssemblyVer2: 'HRInterfaceTests.dll'
+          searchFolder: '$(Agent.TempDirectory)\Tests\'
+          vsTestVersion: 'toolsInstaller'
+          runInParallel: true
+
+      - task: VSTest@2
+        displayName: 'Run project_name.Shared.Tests'
+        inputs:
+          testSelector: 'testAssemblies'
+          testAssemblyVer2: 'project_name.Shared.Tests.dll'
+          searchFolder: '$(Agent.TempDirectory)\Tests\'
+          runInParallel: true
+
+
+      - task: PublishPipelineArtifact@1
+        displayName: 'Publish HRInterface artifacts'
+        inputs:
+          targetPath: '$(Build.ArtifactStagingDirectory)'
+          artifact: 'project_name.HRI_Release'
+          publishLocation: 'pipeline'

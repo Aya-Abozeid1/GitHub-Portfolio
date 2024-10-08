@@ -1,0 +1,41 @@
+name: Build
+# create simple trigger based on everytime we make change to this repository
+on:
+  push:
+    branches:
+      - development
+
+env:
+  PROJECT_ID: ??
+  IMAGE: image_name
+
+
+jobs:
+  Build-Dev-Image:
+    runs-on: ubuntu-latest #run this workflow on ubuntu instance
+    permissions: #make sure we add permission to read and write package
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v1 #checkouts your repo, so this workflow can access it
+
+      - name: Login to GCR
+        uses: google-github-actions/setup-gcloud@v0.3.0 #checkouts GCR repo, so this workflow can access it
+        with:
+          service_account_key: ${{ secrets.SERVICE_ACCOUNT_KEY }} #parse the value of repository secret called SERVICE_ACCOUNT_KEY that we have created earlier
+          project_id: ${{ env.PROJECT_ID }} #parse the value of env called PROJECT_ID
+          export_default_credentials: true
+          
+      - name: Build Docker Image
+        run: docker build --tag "${{env.IMAGE}}:$GITHUB_SHA" --build-arg GITHUB_SHA="$GITHUB_SHA" --build-arg GITHUB_REF="$GITHUB_REF" ./Source #build the docker image
+        
+      - name: Configure Docker Client
+        run:  |-
+          gcloud auth configure-docker --quiet #authenticate to gcr
+
+        #tag docker image to gcr image format then push to gcr
+      - name: Push Docker Image to Container Registry GCR 
+        run: |-
+          docker push "${{env.IMAGE}}:$GITHUB_SHA"
+          gcloud container images add-tag "${{env.IMAGE}}:$GITHUB_SHA" "${{env.IMAGE}}:latest"        

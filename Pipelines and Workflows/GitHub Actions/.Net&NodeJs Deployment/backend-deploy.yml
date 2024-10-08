@@ -1,0 +1,54 @@
+name: Backend Build, Test Workflow
+
+on:
+  push:
+    branches:
+      - main
+      - code-build-ci
+    paths:
+      - "back/src/**"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "back/src/**"
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: back/src
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v2
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore dependencies
+        run: dotnet restore name.sln
+
+      - name: Build
+        run: dotnet build name.sln --configuration Release --no-restore
+
+        ### Unit Testing ###
+      - name: Test and Coverage Report
+        run: |
+          dotnet tool install --global dotnet-reportgenerator-globaltool --version 5.1.23
+          for folder in MicroServices.Tests/*/; do
+            folder_name=$(basename "$folder")
+            dotnet test "$folder" --settings:"./CodeCoverage.runsettings";
+            coveragefile=$(find ${{ github.workspace }}/back/src/$folder**/ -name '*.cobertura.xml' -type f)
+            reportgenerator -reports:$coveragefile -targetdir:${{github.workspace}}/report/$folder_name -reporttypes:MarkdownSummaryGithub "-filefilters:-*.g.cs" -verbosity:Warning
+            sed -i 's/# Summary/## 📝 '"$folder_name"' Code Coverage/g' ${{github.workspace}}/report/$folder_name/SummaryGithub.md
+            sed -i 's/## Coverage/### '"$folder_name"' Code Coverage details/g' ${{github.workspace}}/report/$folder_name/SummaryGithub.md
+            cat ${{github.workspace}}/report/$folder_name/*.md >> $GITHUB_STEP_SUMMARY
+          done
+        # continue-on-error: true
+
+
+

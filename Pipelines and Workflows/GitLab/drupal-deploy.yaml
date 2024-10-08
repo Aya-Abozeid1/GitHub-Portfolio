@@ -1,0 +1,356 @@
+image: docker:latest
+
+services:
+  - docker:dind
+
+variables:
+  DOCKER_DRIVER: overlay
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""
+
+stages:
+  - portal-build
+  - db-build-&-deploy
+  - versioning
+  - portal-deploy
+
+before_script:
+  # Installing requirements
+  - apk update && apk upgrade && apk add --no-cache bash openssh
+  - apt-get update && apt-get install -y google-cloud-sdk
+
+.pre-requisites:
+  &pre-requisites # this will be used whenever you type *pre-requisites in any script.
+  - apk update && apk add curl curl-dev bash
+  # Login to Google Container Registry
+  - echo $SA_KEY > /tmp/$CI_PIPELINE_ID.json
+
+.deploy-pre-requisites:
+  &deploy-pre-requisites # this will be used whenever you type *pre-requisites in any script.
+  - apk update && apk add curl curl-dev bash
+  # Login to Google Container Registry
+  - echo $SA_KEY > /tmp/$CI_PIPELINE_ID.json
+  # activate service account.
+  - gcloud auth activate-service-account $SA_EMAIL --key-file=/tmp/$CI_PIPELINE_ID.json --project=$PROJECT_ID
+  # configure PROJECT_ID to use specific project using gcloud.
+  - gcloud config set project $PROJECT_ID
+  - gcloud config set container/cluster "$GKE_CLUSTER_NAME"
+  # configure docker using gcloud.
+  - gcloud auth configure-docker
+  # connect to kubernetes cluster
+  - gcloud container clusters get-credentials "$GKE_CLUSTER_NAME" --zone europe-west1-d --project $PROJECT_ID
+  - gcloud components install kubectl
+  
+devportal-build-fromcache:
+  stage: portal-build
+  before_script:
+    - echo "Building now from Development branch, please hold-on"
+    - echo "Last commit     $CI_COMMIT_SHORT_SHA"
+    - echo "Job ID          $CI_JOB_ID"
+    - echo "Image by latest $DEV_PORTAL_CI_REGISTRY_IMAGE:latest"
+    - echo "Image by commit $DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    - *pre-requisites
+    - echo CI_COMMIT_SHA=${CI_COMMIT_SHA}
+  script:
+    - curl --request PUT --header "private-token:$GITLAB_ACCESS_TOKEN" "https://gitlab.com/api/v4/projects/$GITLAB_PROJECT_ID/variables/DEV_CURRENT_VERSION_TAG" --form "value=null"
+    - base64 -d $GCP_SA_KEY | docker login -u _json_key --password-stdin https://gcr.io
+
+    # Build and tag image for GCR
+    - docker build --build-arg buildConfiguration=dev --pull --cache-from "$DEV_PORTAL_CI_REGISTRY_IMAGE:latest" -t $DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA ./Source/
+    - docker tag "$DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" "$DEV_PORTAL_CI_REGISTRY_IMAGE:latest"
+    - docker tag "$DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" "$DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_JOB_ID"
+  
+    #//Push the created image tagged with latest commit
+    - docker push "$DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    #//Push the created image tagged with job id
+    - docker push "$DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_JOB_ID"
+    #//Push/update the created image as latest image
+    - docker push "$DEV_PORTAL_CI_REGISTRY_IMAGE:latest"
+    - echo "DEV portal image pushed succeeded!"
+
+    # stores the current commit in DEV_BUILD_COMMIT environment variable to be used in the deployment
+    - curl --request PUT --header "private-token:$GITLAB_ACCESS_TOKEN" "https://gitlab.com/api/v4/projects/$GITLAB_PROJECT_ID/variables/DEV_BUILD_COMMIT" --form "value=$CI_COMMIT_SHORT_SHA"
+  
+    # stores the current tag to development tag environment variable
+    - curl --request PUT --header "private-token:$GITLAB_ACCESS_TOKEN" "https://gitlab.com/api/v4/projects/$GITLAB_PROJECT_ID/variables/DEV_CURRENT_VERSION_TAG" --form "value=$CI_COMMIT_TAG"
+    - echo "deployment succeeded!"
+  after_script:
+    - rm /tmp/$CI_PIPELINE_ID.json
+    - echo "tmp file deleted!"
+  only:
+    - development
+  allow_failure: false
+  
+
+devportal-build-fromscratch:
+  stage: portal-build
+  before_script:
+    - echo "Building now from Development branch, please hold-on"
+    - echo "Last commit     $CI_COMMIT_SHORT_SHA"
+    - echo "Job ID          $CI_JOB_ID"
+    - echo "Image by latest $DEV_PORTAL_CI_REGISTRY_IMAGE:latest"
+    - echo "Image by commit $DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    - *pre-requisites
+    - echo CI_COMMIT_SHA=${CI_COMMIT_SHA}
+  script:
+    - curl --request PUT --header "private-token:$GITLAB_ACCESS_TOKEN" "https://gitlab.com/api/v4/projects/$GITLAB_PROJECT_ID/variables/DEV_CURRENT_VERSION_TAG" --form "value=null"
+    - base64 -d $GCP_SA_KEY | docker login -u _json_key --password-stdin https://gcr.io
+
+    # Build and tag image for GCR
+    - docker build --build-arg buildConfiguration=dev -t $DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA ./Source/
+    - docker tag "$DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" "$DEV_PORTAL_CI_REGISTRY_IMAGE:latest"
+    - docker tag "$DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" "$DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_JOB_ID"
+  
+    #//Push the created image tagged with latest commit
+    - docker push "$DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    #//Push the created image tagged with job id
+    - docker push "$DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_JOB_ID"
+    #//Push/update the created image as latest image
+    - docker push "$DEV_PORTAL_CI_REGISTRY_IMAGE:latest"
+    - echo "DEV portal image pushed succeeded!"
+
+    # stores the current commit in DEV_BUILD_COMMIT environment variable to be used in the deployment
+    - curl --request PUT --header "private-token:$GITLAB_ACCESS_TOKEN" "https://gitlab.com/api/v4/projects/$GITLAB_PROJECT_ID/variables/DEV_BUILD_COMMIT" --form "value=$CI_COMMIT_SHORT_SHA"
+  
+    # stores the current tag to development tag environment variable
+    - curl --request PUT --header "private-token:$GITLAB_ACCESS_TOKEN" "https://gitlab.com/api/v4/projects/$GITLAB_PROJECT_ID/variables/DEV_CURRENT_VERSION_TAG" --form "value=$CI_COMMIT_TAG"
+    - echo "deployment succeeded!"
+  after_script:
+    - rm /tmp/$CI_PIPELINE_ID.json
+    - echo "tmp file deleted!"
+  only:
+    - development
+  when: on_failure
+  allow_failure: false
+  
+devdatabase-build-deploy:
+  stage: db-build-&-deploy
+  image: google/cloud-sdk:alpine
+  before_script:
+    - echo "Deploying now dev database, please hold-on"
+    - echo "Last commit     $CI_COMMIT_SHORT_SHA"
+    - echo "Commit tag      $CI_COMMIT_TAG"
+    - echo "Job ID          $CI_JOB_ID"
+    - echo "Image by latest $DEV_DB_CI_REGISTRY_IMAGE:latest"
+    - echo "Image by job ID $DEV_DB_CI_REGISTRY_IMAGE:$CI_JOB_ID"
+    - echo "Image by commit $DEV_DB_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    - *deploy-pre-requisites
+  script:
+    - base64 -d $GCP_SA_KEY | docker login -u _json_key --password-stdin https://gcr.io
+    # Build and tag image for GCR 
+    - docker build --build-arg buildConfiguration=dev -t $DEV_DB_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA ./Source/database/
+    - docker tag "$DEV_DB_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" "$DEV_DB_CI_REGISTRY_IMAGE:latest"
+    - docker tag "$DEV_DB_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" "$DEV_DB_CI_REGISTRY_IMAGE:$CI_JOB_ID"
+
+    #//Push the created image tagged with latest commit
+    - docker push "$DEV_DB_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    #//Push the created image tagged with job id
+    - docker push "$DEV_DB_CI_REGISTRY_IMAGE:$CI_JOB_ID"
+    #//Push/update the created image as latest image
+    - docker push "$DEV_DB_CI_REGISTRY_IMAGE:latest"
+    - echo "DEV database image pushed succeeded!"
+
+    # copy file to Google cloud storage to insert in image
+    - gsutil -m cp -R ./database/db_name.sql gs://db_name_schema/
+    
+    # Deploy database | commands
+    - kubectl -n development exec -i mariadb-0 -- /bin/bash -c "touch ./temp.sql; mysqldump --add-drop-table --no-data -h $db_hostname -P 3306 -u $db_username -p$GKE_DB_POD_PASS devportal | grep 'DROP TABLE' >> ./temp.sql"
+    - kubectl -n development exec -i mariadb-0 -- mysql -h $db_hostname -P 3306 -u $db_username -p$GKE_DB_POD_PASS devportal < ./database/db_name.sql
+  after_script:
+    - rm /tmp/$CI_PIPELINE_ID.json
+    - echo "tmp file deleted!"
+  environment:
+    name: Dev
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - if: '$CI_COMMIT_SHORT_SHA == $DEV_BUILD_COMMIT'
+      when: always
+
+
+
+#Versioning exists in case Development is Built but not yet deployed and we need to deploy QA
+dev-versioning-TagBased:
+  stage: versioning
+  before_script:
+      - apk update && apk add curl curl-dev bash
+  script: 
+      #//Store the current version tag in an environment variable to be later used to version QA
+      - curl --request PUT --header "private-token:$GITLAB_ACCESS_TOKEN" "https://gitlab.com/api/v4/projects/$GITLAB_PROJECT_ID/variables/DEV_CURRENT_VERSION_TAG" --form "value=$CI_COMMIT_TAG"
+  environment:
+      name: Dev
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+      #// make sure that the DEV_BUILD_COMMIT is the one tagged to set the current version
+    - if: '$CI_COMMIT_TAG != null && $CI_COMMIT_SHORT_SHA == $DEV_BUILD_COMMIT' 
+      when: always
+
+dev-deploy-TagBased:
+  stage: portal-deploy
+  image: google/cloud-sdk:alpine
+  before_script:
+      - echo "Deploying now to Dev GKE Project, please hold-on"
+      - echo "Last commit     $CI_COMMIT_SHORT_SHA"
+      - echo "Commit tag      $CI_COMMIT_TAG"
+      - echo "Job ID          $CI_JOB_ID"
+      - echo "Image by latest $DEV_PORTAL_CI_REGISTRY_IMAGE:latest"
+      - echo "Image by job ID $DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_JOB_ID"
+      - echo "Image by commit $DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+      - *deploy-pre-requisites
+  script:
+      - gcloud container images add-tag -q "$DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" "$DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_TAG"
+      - gcloud container images add-tag -q "$DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" "$DEV_PORTAL_CI_REGISTRY_IMAGE:$CI_JOB_ID"
+      
+      # Deploy Portal  | commands 
+      - kubectl set image statefulset/$GKE_PORTAL_DEPLOYMENT_NAME $DEV_GKE_CONTAINER_NAME="$DEV_PORTAL_CI_REGISTRY_IMAGE:latest" -n development
+      #- kubectl rollout restart statefulset/$GKE_PORTAL_DEPLOYMENT_NAME -n development
+      - kubectl rollout restart statefulset/$GKE_PORTAL_DEPLOYMENT_NAME -n development
+      # Give some time till the stateful pod is up and running (20 sec)
+      - sleep 20
+      - while [[ $(kubectl get pods -l resource=statefulset -n development -o 'jsonpath={..status.conditions[?(@.type=="Ready")].status}') != "True" ]]; do echo "waiting for pod" && sleep 1; done
+      - kubectl -n development exec -i statefulset/$GKE_PORTAL_DEPLOYMENT_NAME -- /bin/bash -c "cd /var/www/portal/web; /var/www/portal/vendor/bin/drush -y cim;  /var/www/portal/vendor/bin/drush locale:update -y;  /var/www/portal/vendor/bin/drush locale:import ar sites/default/files/translations/ar.po --type=customized --override=all -y; /var/www/portal/vendor/bin/drush cr; /var/www/portal/vendor/bin/drush -y cim; /var/www/portal/vendor/bin/drush cr; /var/www/portal/vendor/bin/drush updb -y; /var/www/portal/vendor/bin/drush cr;"
+
+      # open merge request from development to QA branch
+      - curl --request POST --header "PRIVATE-TOKEN:$GITLAB_ACCESS_TOKEN" "https://gitlab.com/api/v4/projects/$GITLAB_PROJECT_ID/merge_requests"
+        --form 'title=MERGE DEV TO QA'
+        --form 'source_branch=development'
+        --form 'target_branch=QA'
+  environment:
+      name: Dev
+  after_script:
+    - rm /tmp/$CI_PIPELINE_ID.json
+    - echo "tmp file deleted!"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    #// make sure that the DEV_BUILD_COMMIT is the one tagged when deploying dev
+    - if: '$CI_COMMIT_TAG != null && $CI_COMMIT_SHORT_SHA == $DEV_BUILD_COMMIT'
+      when: always  
+  allow_failure: false
+
+qaportal-build:
+  stage: portal-build
+  variables:
+    QATag: $DEV_CURRENT_VERSION_TAG.QA
+  before_script:
+    - echo "Building now from QA branch, please hold-on"
+    - echo "Last commit     $CI_COMMIT_SHORT_SHA"
+    - echo "Job ID          $CI_JOB_ID"
+    - echo "Image by latest $QA_PORTAL_CI_REGISTRY_IMAGE:latest"
+    - echo "Image by commit $QA_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    - *pre-requisites
+    - echo CI_COMMIT_SHA=${CI_COMMIT_SHA}
+  script:
+    - curl --request PUT --header "private-token:$GITLAB_ACCESS_TOKEN" "https://gitlab.com/api/v4/projects/$GITLAB_PROJECT_ID/variables/QA_CURRENT_VERSION_TAG" --form "value=null"
+    - base64 -d $GCP_SA_KEY | docker login -u _json_key --password-stdin https://gcr.io
+    - echo "$APIGEE_CRED_ORG,$APIGEE_CRED_USER,$APIGEE_CRED_PASS,$APIGEE_CRED_ENDP" | base64 > ./Source/keys/apigee.cred
+    
+    # Build and tag image for GCR
+    - docker build --build-arg buildConfiguration=qa -t $QA_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA ./Source/
+    - docker tag "$QA_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" "$QA_PORTAL_CI_REGISTRY_IMAGE:latest"
+    - docker tag "$QA_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" "$QA_PORTAL_CI_REGISTRY_IMAGE:$CI_JOB_ID"
+  
+    #//Push the created image tagged with latest commit
+    - docker push "$QA_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    #//Push the created image tagged with job id
+    - docker push "$QA_PORTAL_CI_REGISTRY_IMAGE:$CI_JOB_ID"
+    #//Push/update the created image as latest image
+    - docker push "$QA_PORTAL_CI_REGISTRY_IMAGE:latest"
+    - echo "QA portal image pushed succeeded!"
+
+    #// Tag the commit merging to QA, which starts another pipeline for activating QA deploy job. 
+    - curl --request POST --header "private-token:$GITLAB_ACCESS_TOKEN" "https://gitlab.com/api/v4/projects/$GITLAB_PROJECT_ID/repository/tags?tag_name=$QATag&ref=QA"
+    #// Store the commit ID that activated the QA Build job in an environment variable called QA_BUILD_COMMIT, to make sure that the QA_BUILD_COMMIT is the one tagged when deploying QA later
+    - curl --request PUT --header "private-token:$GITLAB_ACCESS_TOKEN" "https://gitlab.com/api/v4/projects/$GITLAB_PROJECT_ID/variables/QA_BUILD_COMMIT" --form "value=$CI_COMMIT_SHORT_SHA"
+    - echo "deployment succeeded!"
+  after_script:
+    - rm /tmp/$CI_PIPELINE_ID.json
+    - echo "tmp file deleted!"
+  only:
+    refs:
+      - QA
+    variables:
+      - $DEV_CURRENT_VERSION_TAG != "null" || $DEV_CURRENT_VERSION_TAG != ""
+
+  
+qadatabase-build-deploy:
+  stage: db-build-&-deploy
+  image: google/cloud-sdk:alpine
+  before_script:
+    - echo "Deploying now to QA GKE Project, please hold-on"
+    - echo "Last commit     $CI_COMMIT_SHORT_SHA"
+    - echo "Commit tag      $CI_COMMIT_TAG"
+    - echo "Job ID          $CI_JOB_ID"
+    - echo "Image by latest $QA_DB_CI_REGISTRY_IMAGE:latest"
+    - echo "Image by job ID $QA_DB_CI_REGISTRY_IMAGE:$CI_JOB_ID"
+    - echo "Image by commit $QA_DB_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    - *deploy-pre-requisites
+  script:
+    - base64 -d $GCP_SA_KEY | docker login -u _json_key --password-stdin https://gcr.io
+    # Build and tag image for GCR
+    - docker build --build-arg buildConfiguration=qa -t $QA_DB_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA ./Source/database
+    - docker tag "$QA_DB_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" "$QA_DB_CI_REGISTRY_IMAGE:latest"
+    - docker tag "$QA_DB_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" "$QA_DB_CI_REGISTRY_IMAGE:$CI_JOB_ID"
+
+    #//Push the created image tagged with latest commit
+    - docker push "$QA_DB_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    #//Push the created image tagged with job id
+    - docker push "$QA_DB_CI_REGISTRY_IMAGE:$CI_JOB_ID"
+    #//Push/update the created image as latest image
+    - docker push "$QA_DB_CI_REGISTRY_IMAGE:latest"
+    - echo "DEV database image pushed succeeded!"
+
+    # Deploy database | commands
+    - kubectl -n qa exec -i mariadb-0 -- /bin/bash -c "touch ./temp-db.sql; mysqldump --add-drop-table --no-data -h $db_hostname -P 3306 -u $db_username  -p$GKE_DB_POD_PASS devportal | grep 'DROP TABLE' >> ./temp-db.sql"
+    - kubectl -n qa exec -i mariadb-0 -- mysql -h $db_hostname -P 3306 -u $db_username  -p$GKE_DB_POD_PASS devportal < ./Source/database/$db_name.sql
+  
+  after_script:
+    - rm /tmp/$CI_PIPELINE_ID.json
+    - echo "tmp file deleted!"
+  environment:
+    name: QA
+  only:
+    refs:
+      - QA
+    changes:
+      - Source/database/$db_name.sql
+      - Source/database/Dockerfile
+
+qa-deploy-TagBased:
+  stage: portal-deploy
+  image: google/cloud-sdk:alpine
+  before_script:
+      - echo "Deploying now to QA GKE Project, please hold-on"
+      - echo "Last commit     $CI_COMMIT_SHORT_SHA"
+      - echo "Commit tag      $CI_COMMIT_TAG"
+      - echo "Job ID          $CI_JOB_ID"
+      - echo "Image by latest $QA_PORTAL_CI_REGISTRY_IMAGE:latest"
+      - echo "Image by job ID $QA_PORTAL_CI_REGISTRY_IMAGE:$CI_JOB_ID"
+      - echo "Image by commit $QA_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+      - *deploy-pre-requisites
+  script:
+      - curl --request PUT --header "private-token:$GITLAB_ACCESS_TOKEN" "https://gitlab.com/api/v4/projects/$GITLAB_PROJECT_ID/variables/QA_CURRENT_VERSION_TAG" --form "value=$DEV_CURRENT_VERSION_TAG"
+      
+      - gcloud container images add-tag -q "$QA_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" "$QA_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_TAG"
+      - gcloud container images add-tag -q "$QA_PORTAL_CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" "$QA_PORTAL_CI_REGISTRY_IMAGE:$CI_JOB_ID"
+
+      
+      # Deploy Portal | commands
+      - kubectl set image statefulset/$GKE_PORTAL_DEPLOYMENT_NAME $QA_GKE_CONTAINER_NAME="$QA_PORTAL_CI_REGISTRY_IMAGE:latest" --namespace=qa
+      - kubectl rollout restart statefulset/$GKE_PORTAL_DEPLOYMENT_NAME -n qa
+      - sleep 20
+      - while [[ $(kubectl get pods -l resource=statefulset -n qa -o 'jsonpath={..status.conditions[?(@.type=="Ready")].status}') != "True" ]]; do echo "waiting for pod" && sleep 1; done
+      - kubectl -n qa exec -i statefulset/$GKE_PORTAL_DEPLOYMENT_NAME -- /bin/bash -c "cd /var/www/portal/web; /var/www/portal/vendor/bin/drush -y cim;  /var/www/portal/vendor/bin/drush locale:update -y;  /var/www/portal/vendor/bin/drush locale:import ar sites/default/files/translations/ar.po --type=customized --override=all -y; /var/www/portal/vendor/bin/drush cr; /var/www/portal/vendor/bin/drush -y cim; /var/www/portal/vendor/bin/drush cr; /var/www/portal/vendor/bin/drush updb -y; /var/www/portal/vendor/bin/drush cr;"
+  environment:
+      name: QA
+  after_script:
+    - rm /tmp/$CI_PIPELINE_ID.json
+    - echo "tmp file deleted!"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+      #// make sure that the QA_BUILD_COMMIT is the one tagged when deploying qa
+    - if: '$CI_COMMIT_TAG != null && $CI_COMMIT_SHORT_SHA == $QA_BUILD_COMMIT'
+      when: always
+  allow_failure: true
